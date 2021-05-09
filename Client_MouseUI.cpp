@@ -1,98 +1,196 @@
 #include "stdafx.h"
-#include "..\Headers\MouseUI.h"
+#include "..\Headers\MonsterUI.h"
 
+#include "GunGenji.h"
 
-CMouseUI::CMouseUI(_Device pDevice)
-	: CUI(pDevice)
+CMonsterUI::CMonsterUI(_Device Graphic_Device)
+	: CUI(Graphic_Device)
 {
 }
 
-CMouseUI::CMouseUI(const CMouseUI & rhs)
+CMonsterUI::CMonsterUI(const CMonsterUI& rhs)
 	: CUI(rhs)
 {
 }
 
-HRESULT CMouseUI::Ready_GameObject_Prototype()
+HRESULT CMonsterUI::Ready_GameObject_Prototype()
 {
 	CUI::Ready_GameObject_Prototype();
-	return NOERROR;
+
+	return S_OK;
 }
 
-HRESULT CMouseUI::Ready_GameObject(void * pArg)
+HRESULT CMonsterUI::Ready_GameObject(void* pArg)
 {
 	if (FAILED(Add_Component()))
 		return E_FAIL;
+
 	CUI::Ready_GameObject(pArg);
 
-	m_fPosX = _float(g_pInput_Device->Get_MousePos().x);
-	m_fPosY = _float(g_pInput_Device->Get_MousePos().y);
+	m_pFontNum = static_cast<CUI_FontNum*>(g_pManagement->Clone_GameObject_Return(L"GameObject_FontNum", nullptr));
+	m_pFontNum->Set_Type(CUI_FontNum::Billboard_UI);
 
-	m_fSizeX = 30.f;
-	m_fSizeY = 30.f;
-	m_fViewZ = -3.f;
+	m_fSizeX = m_pTransformCom->Get_Size().x;
+	m_fSizeY = m_pTransformCom->Get_Size().y;
 
-	ShowCursor(FALSE);
-	m_bIsActive = false;
-
-	return NOERROR;
+	return S_OK;
 }
 
-_int CMouseUI::Update_GameObject(_double TimeDelta)
+HRESULT CMonsterUI::LateInit_GameObject()
 {
+	return S_OK;
+}
+
+_int CMonsterUI::Update_GameObject(_double TimeDelta)
+{
+	CGameObject::LateInit_GameObject();
 	CUI::Update_GameObject(TimeDelta);
 
-	m_pRendererCom->Add_RenderList(RENDER_UI, this);
+	if (true == m_pTarget->Get_Dead())
+		return DEAD_OBJ;
 
-	D3DXMatrixOrthoLH(&m_matProj, WINCX, WINCY, 0.f, 1.f);
+	SetUp_State(TimeDelta);
 
-	m_fPosX = _float(g_pInput_Device->Get_MousePos().x);
-	m_fPosY = _float(g_pInput_Device->Get_MousePos().y);
+	_mat matBill, matWorld, matView;
+	matWorld = m_pTransformCom->Get_WorldMat();
 
-	return NO_EVENT;
+	matView = g_pManagement->Get_Transform(D3DTS_VIEW);
+	D3DXMatrixIdentity(&matBill);
+
+	matBill._11 = matView._11;
+	matBill._13 = matView._13;
+	matBill._31 = matView._31;
+	matBill._33 = matView._33;
+
+	D3DXMatrixInverse(&matBill, NULL, &matBill);
+
+	m_pTransformCom->Set_WorldMat((matBill * matWorld));
+	m_pTransformCom->Set_Scale(_v3(0.8f, 0.08f, 0.8f));
+
+	_mat TempBonmatrix;
+	TempBonmatrix = *m_matMonsterBon * (TARGET_TO_TRANS(m_pTarget)->Get_WorldMat());
+
+	//==================================================
+	if (true == m_bShowFont)
+	{
+		m_pFontNum->Set_ParentMatrix(&TempBonmatrix);
+		m_pFontNum->Update_GameObject(TimeDelta);
+		m_pFontNum->Update_NumberValue(m_fValueGap_Acc);
+		m_pFontNum->Set_Alpha(m_fTimerAlpha);
+	}
+	//==================================================
+
+	m_pTransformCom->Set_Pos(_v3(m_matMonsterBon->_41, m_matMonsterBon->_42 + 0.9f, m_matMonsterBon->_43));
+
+
+	if (0 == m_iCheck_Renderindex)
+		m_pTransformCom->Set_Pos((_v3(TempBonmatrix._41, TempBonmatrix._42 + 0.9f, (TempBonmatrix._43 - 0.06f))));
+
+	if (1 == m_iCheck_Renderindex)
+		m_pTransformCom->Set_Pos((_v3(TempBonmatrix._41, TempBonmatrix._42 + 0.9f, (TempBonmatrix._43 - 0.02f))));
+
+	if (2 == m_iCheck_Renderindex)
+		m_pTransformCom->Set_Pos((_v3(TempBonmatrix._41, TempBonmatrix._42 + 0.9f, TempBonmatrix._43 - 0.01f)));
+
+	//========================================================================
+	_float fNewTargetHp = m_pTarget->Get_Target_Param().fHp_Cur;
+
+	if (fNewTargetHp < m_fMonsterHp)
+	{
+		_float fGapHp = m_fMonsterHp - fNewTargetHp;
+		m_fValueGap_Acc += fGapHp;
+
+		m_bShowFont = true;
+		m_fTimerAlpha = 1.f;
+		m_fShowFontTimer = 0.f;
+		m_pFontNum->Set_ScaleUp(10.f);
+	}
+
+	m_fMonsterHp = fNewTargetHp;
+	//========================================================================
+	m_fTotalHP = m_pTarget->Get_Target_Param().fHp_Max;
+
+	CGameObject* pPlayer = g_pManagement->Get_GameObjectBack(L"Layer_Player", SCENE_MORTAL);
+
+	_v3 Player_D3 = TARGET_TO_TRANS(pPlayer)->Get_Pos() - TARGET_TO_TRANS(m_pTarget)->Get_Pos();
+
+	if (V3_LENGTH(&Player_D3) <= 10.f)
+		m_bCheck_Dir = true;
+	else
+		m_bCheck_Dir = false;
+
+	if (true == m_bCheck_Dir)
+		m_pRendererCom->Add_RenderList(RENDER_UI, this);
+
+	if (m_fMonsterHp <= 0)
+		m_bShowFont = false;
+
+	if (true == m_bShowFont)
+		Update_ShowFont();
+
+	Compute_ViewZ(&m_pTransformCom->Get_Pos());
+
+	return S_OK;
 }
 
-_int CMouseUI::Late_Update_GameObject(_double TimeDelta)
+_int CMonsterUI::Late_Update_GameObject(_double TimeDelta)
 {
-	D3DXMatrixIdentity(&m_matWorld);
-	D3DXMatrixIdentity(&m_matView);
-
-	m_matWorld._11 = m_fSizeX;
-	m_matWorld._22 = m_fSizeY;
-	m_matWorld._33 = 1.f;
-	m_matWorld._41 = m_fPosX - WINCX * 0.5f;
-	m_matWorld._42 = -m_fPosY + WINCY * 0.5f;
-
-	return NO_EVENT;
+	return S_OK;
 }
 
-HRESULT CMouseUI::Render_GameObject()
+HRESULT CMonsterUI::Render_GameObject()
 {
-	if (!m_bIsActive)
-		return NOERROR;
-
-	if (nullptr == m_pShaderCom ||
-		nullptr == m_pBufferCom)
+	if (nullptr == m_pShaderCom || nullptr == m_pBufferCom)
 		return E_FAIL;
-
-	g_pManagement->Set_Transform(D3DTS_WORLD, m_matWorld);
-	g_pManagement->Set_Transform(D3DTS_VIEW, m_matView);
-	g_pManagement->Set_Transform(D3DTS_PROJECTION, m_matProj);
 
 	if (FAILED(SetUp_ConstantTable(0)))
 		return E_FAIL;
 
-	m_pShaderCom->Begin_Shader();
-	m_pShaderCom->Begin_Pass(1);
-	m_pBufferCom->Render_VIBuffer();
-	m_pShaderCom->End_Pass();
-	m_pShaderCom->End_Shader();
+	if (m_fMonsterHp > 0)
+	{
+		m_pShaderCom->Begin_Shader();
 
-	return NOERROR;
+		_uint Temp[3] = { 0, 2, 2 };
+
+		for (_uint i = 0; i < 3; ++i)
+		{
+			m_pShaderCom->Begin_Pass(Temp[i]);
+
+			if (i == 0)
+				m_iCheck_Renderindex = 0;
+
+			if (i == 1)
+			{
+				if (FAILED(m_pShaderCom->Set_Value("g_fPercentage", &m_fWhite_Percentage, sizeof(_float))))
+					return E_FAIL;
+
+				m_iCheck_Renderindex = 1;
+			}
+
+			if (i == 2)
+			{
+				if (FAILED(m_pShaderCom->Set_Value("g_fPercentage", &m_fPercentage, sizeof(_float))))
+					return E_FAIL;
+
+				m_iCheck_Renderindex = 2;
+			}
+
+			if (FAILED(m_pTextureCom->SetUp_OnShader("g_DiffuseTexture", m_pShaderCom, i)))
+				return E_FAIL;
+
+			m_pShaderCom->Commit_Changes();
+			m_pBufferCom->Render_VIBuffer();
+			m_pShaderCom->End_Pass();
+		}
+
+		m_pShaderCom->End_Shader();
+	}
+
+	return S_OK;
 }
 
-HRESULT CMouseUI::Add_Component()
+HRESULT CMonsterUI::Add_Component()
 {
-	// For.Com_Transform
 	if (FAILED(CGameObject::Add_Component(SCENE_STATIC, L"Transform", L"Com_Transform", (CComponent**)&m_pTransformCom)))
 		return E_FAIL;
 
@@ -101,7 +199,7 @@ HRESULT CMouseUI::Add_Component()
 		return E_FAIL;
 
 	// For.Com_Texture
-	if (FAILED(CGameObject::Add_Component(SCENE_STATIC, L"DefaultTex_MouseUI", L"Com_Texture", (CComponent**)&m_pTextureCom)))
+	if (FAILED(CGameObject::Add_Component(SCENE_STATIC, L"Tex_MonsterHPBar", L"Com_Texture", (CComponent**)&m_pTextureCom)))
 		return E_FAIL;
 
 	// For.Com_Shader
@@ -112,57 +210,104 @@ HRESULT CMouseUI::Add_Component()
 	if (FAILED(CGameObject::Add_Component(SCENE_STATIC, L"VIBuffer_Rect", L"Com_VIBuffer", (CComponent**)&m_pBufferCom)))
 		return E_FAIL;
 
-	return NOERROR;
+	return S_OK;
 }
 
-HRESULT CMouseUI::SetUp_ConstantTable(_uint iIndex)
+HRESULT CMonsterUI::SetUp_ConstantTable(_uint TextureIndex)
 {
 	if (nullptr == m_pShaderCom)
 		return E_FAIL;
 
-	if (FAILED(m_pShaderCom->Set_Value("g_matWorld", &m_matWorld, sizeof(_mat))))
+	if (FAILED(m_pShaderCom->Set_Value("g_matWorld", &m_pTransformCom->Get_WorldMat(), sizeof(_mat))))
 		return E_FAIL;
-	if (FAILED(m_pShaderCom->Set_Value("g_matView", &m_matView, sizeof(_mat))))
-		return E_FAIL;
-	if (FAILED(m_pShaderCom->Set_Value("g_matProj", &m_matProj, sizeof(_mat))))
-		return E_FAIL;
-	if (FAILED(m_pTextureCom->SetUp_OnShader("g_DiffuseTexture", m_pShaderCom, iIndex)))
+	if (FAILED(m_pShaderCom->Set_Value("g_matView", &g_pManagement->Get_Transform(D3DTS_VIEW), sizeof(_mat))))
 		return E_FAIL;
 
-	return NOERROR;
+	if (FAILED(m_pShaderCom->Set_Value("g_matProj", &g_pManagement->Get_Transform(D3DTS_PROJECTION), sizeof(_mat))))
+		return E_FAIL;
+	if (FAILED(m_pShaderCom->Set_Value("g_fSpeed", &m_fSpeed, sizeof(_float))))
+		return E_FAIL;
+
+	if (FAILED(m_pShaderCom->Set_Value("g_fAlpha", &m_fAlpha, sizeof(_float))))
+		return E_FAIL;
+
+	if (FAILED(m_pShaderCom->Set_Value("g_fPercentage", &m_fPercentage, sizeof(_float))))
+		return E_FAIL;
+
+	return S_OK;
 }
 
-CMouseUI * CMouseUI::Create(_Device pGraphic_Device)
+void CMonsterUI::SetUp_State(_double TimeDelta)
 {
-	CMouseUI* pInstance = new CMouseUI(pGraphic_Device);
+	m_fPercentage = m_fMonsterHp / m_fTotalHP;
+
+	if (m_fTotalHP > m_fMonsterHp)
+		m_fOldHP = m_fMonsterHp;
+
+	if (m_fPercentage < m_fWhite_Percentage)
+	{
+		_float fGap = m_fPercentage - m_fWhite_Percentage;
+
+		if (fGap < 0)
+			fGap = 0.05f;
+
+		m_fWhite_Percentage -= fGap * 5.f * (_float)TimeDelta;
+
+		if (m_fWhite_Percentage < m_fPercentage)
+			m_fWhite_Percentage = m_fPercentage;
+	}
+
+	// 줄어들 때, 빨간색 먼저 줄어든 뒤, 약 0.1초 후 하얀색이 천천히 줄어든다.
+	// 만약 몬스터가 죽는다면 랜더를 종료한다.
+	if (m_fMonsterHp >= m_fTotalHP)
+		m_fMonsterHp = m_fTotalHP;
+
+	if (m_fMonsterHp <= 0.f)
+		m_fMonsterHp = 0.f;
+}
+
+void CMonsterUI::Update_ShowFont()
+{
+	m_fShowFontTimer += g_pTimer_Manager->Get_DeltaTime(L"Timer_Fps_60");
+	m_fTimerAlpha = 1.f - (m_fShowFontTimer / m_fShowFontTimer_Max);
+
+	if (m_fShowFontTimer >= m_fShowFontTimer_Max)
+	{
+		m_fShowFontTimer = 0.f;
+		m_bShowFont = false;
+		m_fValueGap_Acc = 0.f;
+		m_fTimerAlpha = 0.f;
+	}
+}
+
+CMonsterUI* CMonsterUI::Create(_Device pGraphic_Device)
+{
+	CMonsterUI* pInstance = new CMonsterUI(pGraphic_Device);
 
 	if (FAILED(pInstance->Ready_GameObject_Prototype()))
-	{
-		MSG_BOX("Fail Creating MouseUI");
 		Safe_Release(pInstance);
-	}
+
 	return pInstance;
 }
 
-CGameObject * CMouseUI::Clone_GameObject(void * pArg)
+CGameObject* CMonsterUI::Clone_GameObject(void * pArg)
 {
-	CMouseUI* pInstance = new CMouseUI(*this);
+	CMonsterUI* pInstance = new CMonsterUI(*this);
 
 	if (FAILED(pInstance->Ready_GameObject(pArg)))
-	{
-		MSG_BOX("Fail To Cloned MouseUI");
 		Safe_Release(pInstance);
-	}
+
 	return pInstance;
 }
 
-void CMouseUI::Free()
+void CMonsterUI::Free()
 {
+	Safe_Release(m_pFontNum);
 	Safe_Release(m_pTransformCom);
-	Safe_Release(m_pRendererCom);
 	Safe_Release(m_pBufferCom);
-	Safe_Release(m_pTextureCom);
 	Safe_Release(m_pShaderCom);
+	Safe_Release(m_pTextureCom);
+	Safe_Release(m_pRendererCom);
 
-	CUI::Free();
+	CGameObject::Free();
 }

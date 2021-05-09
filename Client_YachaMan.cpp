@@ -21,9 +21,6 @@ HRESULT CYachaMan::Ready_GameObject(void * pArg)
 	if (FAILED(Add_Component(pArg)))
 		return E_FAIL;
 
-	m_pTransformCom->Set_Pos(_v3(1.f, 0.f, 1.f));
-	m_pTransformCom->Set_Scale(V3_ONE);
-
 	Ready_Status(pArg);
 	Ready_BoneMatrix();
 	Ready_Collider();
@@ -320,6 +317,7 @@ void CYachaMan::Check_PosY()
 		D3DXVECTOR3 JumpLength = { 0, -fYSpeed, 0 };
 		m_pTransformCom->Add_Pos(JumpLength);
 	}
+
 	return;
 }
 
@@ -4642,6 +4640,9 @@ HRESULT CYachaMan::SetUp_ConstantTable(CShader* pShader)
 
 HRESULT CYachaMan::Ready_Status(void * pArg)
 {
+	m_pTransformCom->Set_Pos(_v3(1.f, 0.f, 1.f));
+	m_pTransformCom->Set_Scale(V3_ONE);
+
 	if (nullptr == pArg)
 	{
 		MSG_BOX("Create CYachaMan pArgument nullptr Failed");
